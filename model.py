@@ -11,23 +11,35 @@ from pathlib import Path
 
 from settings import Settings
 
-def loss_f(y_true, y_pred):   
-
-    loss = tf.reduce_mean(
-            tf.nn.sigmoid_cross_entropy_with_logits(
-                    logits=y_pred, 
-                    labels=y_true))
-
-    return loss
-
+#class VAARSimilarityLoss(K.losses.Loss):
+#    
+#    def __init__(self, output_similarity, reduction=tf.keras.losses.Reduction.AUTO, name='VAARSimilarityLoss'):
+#        super().__init__(reduction=reduction, name=name)
+#        self.output_similarity = output_similarity
+#
+#    def sdr_loss(self, sig_true, sig_pred):
+#        return (-tf.reduce_mean(sig_true * sig_pred) /
+#                (tf.norm(tensor=sig_pred) * tf.norm(tensor=sig_true)))
+#
+#    def call(self, y_true, y_pred):
+#        noise_true = self.noisy_signal - y_true
+#        noise_pred = self.noisy_signal - y_pred
+#        alpha = (tf.reduce_mean(tf.square(y_true)) /
+#                 tf.reduce_mean(tf.square(y_true) + tf.square(self.noisy_signal - y_pred)))
+#        return 
+#    
+#    alpha * self.sdr_loss(y_true, y_pred) + (1 - alpha) * self.sdr_loss(noise_true, noise_pred)
+    
 class Model:
 
         
     def _vars_input_generator(self):
         
         while(True):
-            vars_input = np.zeros(
-                shape=(
+            vars_input = np.random.uniform(
+                low=0,
+                high=1,
+                size=(
                     Settings.BATCH_SIZE,
                     Settings.VARS_TOTAL_DIM,
                     2))
@@ -43,8 +55,7 @@ class Model:
                     self._n_states))            
             
             yield vars_input, [sim_targets, recode_targets]
-
-    
+            
     def train(self):
         logdir="logs/fit/" + datetime.now().strftime("%Y%m%d-%H%M%S")
         tensorboard_callback = K.callbacks.TensorBoard(log_dir=logdir)
@@ -54,7 +65,8 @@ class Model:
                 steps_per_epoch=Settings.TRAIN_STEPS_N, 
                 epochs=Settings.TRAIN_EPOCHS_N, 
                 verbose = 1,
-                callbacks=[tensorboard_callback])
+                callbacks=[tensorboard_callback]
+            )
         
     def summary(self):
         return self._model.summary()
@@ -136,20 +148,18 @@ class Model:
                 
         return vars_sem, vars_struct
     
-
+    @tf.function
     def _get_vaar(self, target_vars, base_vars):
         """            
             Build TF graph of VAAR (the Vector Approach to Analogical Reasoning)
         """
-                 
-        recode_mat = self._get_recode_matrix()                
 
         recode_sem_target_func = \
             lambda vars_sem: \
                 tf.reshape(
                     tf.matmul(
                         tf.reshape(
-                            recode_mat,
+                            self._recode_mat,
                             [
                                 self._n_states * Settings.N_SLOTS,
                                 Settings.N_SLOTS
@@ -170,7 +180,7 @@ class Model:
                                         tf.reshape(
                                             tf.matmul(
                                                 tf.reshape(
-                                                    recode_mat, 
+                                                    self._recode_mat, 
                                                     [
                                                         (self._n_states 
                                                          * Settings.N_SLOTS), 
@@ -192,7 +202,7 @@ class Model:
                                                 Settings.N_SLOTS, 
                                                 Settings.N_SLOTS
                                             ]),
-                                        tf.transpose(recode_mat, [0, 2, 1]),
+                                        tf.transpose(self._recode_mat, [0, 2, 1]),
                                     )
                                     for a_i in range(Settings.MAX_ARITY)
                                 ], 0
@@ -278,29 +288,28 @@ class Model:
         
         #get maximum similarity
         max_similarities = tf.reduce_max(similarities, axis=-1)
-
+        
         #get the indices of the recoding which maximize similarity
         best_recodings = tf.argmax(similarities, axis=-1)
 
         return max_similarities, best_recodings
     
-    def _build(self):
+
+    def _build_model(self):
+
         VARS_input = K.layers.Input(
                 shape=(Settings.VARS_TOTAL_DIM,2,),
                 batch_size=Settings.BATCH_SIZE,
-                dtype = 'float32',
                 name='VARS_input')
                 
         hidden_layer = K.layers.Dense(
                 activation="relu",        
                 units=Settings.HIDDEN_UNITS_N,
-                dtype = 'float32', 
                 name='hidden_layer')
         
         embed_layer = K.layers.Dense(
                 activation="tanh",        
                 units=Settings.EMBDED_DIM,
-                dtype = 'float32', 
                 name='embed_layer')
         
         
@@ -316,52 +325,55 @@ class Model:
         recode_hidden_layer = K.layers.Dense(
                 activation="tanh",        
                 units=Settings.RECODE_HIDDEN_UNITS_N,
-                dtype = 'float32', 
                 name='recode_hidden_layer')(
                         K.layers.concatenate(
                                 [embedding1, embedding2], axis=-1))
-        
+
         output_similarity = K.layers.dot(
                 [embedding1, embedding2], 
                 axes=-1,
                 normalize=True,
                 name="similarity_output")
-        
+                
         output_recode = K.layers.Dense(
                 units = self._n_states,
+                activation = "softmax",
                 name="recode_output")(recode_hidden_layer)
+
+        vaar_similarity, vaar_recoding = self._get_vaar(vars1, vars2)
+     
+        similarity_match = K.layers.Lambda(
+                lambda x : x, 
+                name="sim")(K.losses.mse(
+                                output_similarity,
+                                tf.expand_dims(vaar_similarity, 1)))
+        
+        recode_match = K.layers.Lambda(
+                lambda x : x, 
+                name="recode")(K.losses.categorical_crossentropy(
+                                output_recode,
+                                tf.one_hot(vaar_recoding, self._n_states)))
         
         self._model = K.Model(
                 inputs=[VARS_input],
-                outputs=[output_similarity, output_recode])
+                outputs=[similarity_match, recode_match]
+                )
         
-        vaar_similarity, vaar_recoding = self._get_vaar(vars1, vars2)
-        
-        losses = {
-            "similarity_output": lambda y_true, y_pred:
-                    tf.reduce_mean(
-                        tf.nn.sigmoid_cross_entropy_with_logits(
-                            logits=y_pred, 
-                            labels=tf.expand_dims(vaar_similarity, 1)))
-                    ,
-            "recode_output": lambda y_true, y_pred:
-                tf.reduce_mean(
-                    tf.nn.softmax_cross_entropy_with_logits(
-                        logits=y_pred, 
-                        labels=tf.one_hot(vaar_recoding, self._n_states)))
-        }
-            
         self._model.compile(
-                loss = losses, 
-                optimizer = K.optimizers.RMSprop(lr = Settings.LR))
-        
+                loss=lambda y_true, y_pred: tf.reduce_mean(y_pred), 
+                optimizer=K.optimizers.RMSprop(lr = Settings.LR),
+                metrics={"recode": "acc"}
+                )
+                    
     def save(self):
         pass
 
     def save_model_image(self, filename):
         K.utils.plot_model(self._model, to_file=filename)
         
-    def __init__(self):        
+    def __init__(self):    
+        
         self._n_states = int(factorial(Settings.N_SLOTS))            
-        self._build()
+        self._recode_mat = self._get_recode_matrix()
+        self._build_model()
         
