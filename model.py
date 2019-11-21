@@ -62,10 +62,9 @@ class Model:
                 
             is_target_populated = True
             
-            vars_input[:,:Settings.VARS_SEM_DIM,target_base] = np.random.choice(
-                [-1, 1],
-                replace=True,
-                p=[0.5, 0.5],
+            vars_input[:,:Settings.VARS_SEM_DIM,target_base] = np.random.uniform(
+                low=0,
+                high=1,
                 size=(
                     Settings.BATCH_SIZE,
                     Settings.VARS_SEM_DIM,
@@ -88,7 +87,7 @@ class Model:
         tensorboard_callback = K.callbacks.TensorBoard(log_dir=logdir)
 
         self._model.fit_generator(
-                self._vars_input_generator(False),
+                self._vars_input_generator(True),
                 steps_per_epoch=Settings.TRAIN_STEPS_N,
                 epochs=Settings.TRAIN_EPOCHS_N,
                 verbose=1,
@@ -96,20 +95,27 @@ class Model:
                 validation_steps=10,
                 callbacks=[tensorboard_callback]
             )
-#        data, _ = next(self._vars_input_generator(True))
-#        outputs = self._model.predict_generator(
-#                self._vars_input_generator(True),
-#                steps=1)
-#        print("\n")
-#        print("e sim\t{}".format("\t".join(map(lambda x: "{:.3f}".format(x),  outputs[0]))))
-#        print("v sim\t{}".format("\t".join(map(lambda x: "{:.3f}".format(x),  outputs[1]))))
-#        print("\n")
-#        print("\n")
-#        print("e sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
-#              np.argsort(outputs[0]).argsort()))))
-#        print("v sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
-#              np.argsort(outputs[1]).argsort()))))
-#        print("\n")
+        data, _ = next(self._vars_input_generator(True))
+        outputs = self._model.predict_generator(
+                self._vars_input_generator(True),
+                steps=1)
+        print("\n")
+        print("e sim\t{}".format("\t".join(map(lambda x: "{:.3f}".format(x),  outputs[0]))))
+        print("v sim\t{}".format("\t".join(map(lambda x: "{:.3f}".format(x),  outputs[1]))))
+        print("\n")
+        print("\n")
+        print("e sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
+              np.argsort(outputs[0])))))
+        print("v sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
+              np.argsort(outputs[1])))))
+        print("\n")
+        
+        print("\n")
+        print("e sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
+              np.argsort(outputs[0]).argsort()))))
+        print("v sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
+              np.argsort(outputs[1]).argsort()))))
+        print("\n")
 #        
 #        exit(0)
         self._model.save("last.model.h5")
@@ -445,10 +451,22 @@ class Model:
 #                    tf.cast(tf.abs(e_ranks - v_ranks), dtype=tf.float32))
             
         def loss_f(y_true, y_pred):
-            return \
-                K.losses.mse(
-                        tf.nn.softmax(y_pred[0,:]), 
-                        tf.nn.softmax(y_pred[1,:]))
+            
+            s_out = y_pred[0, :]
+            v_out = y_pred[1, :]
+            s_r = tf.argsort(tf.argsort(s_out))
+            v_r = tf.argsort(tf.argsort(v_out))
+            
+            r_diff = tf.cast(s_r - v_r, tf.float64)
+            
+            return K.losses.mse(
+                    s_out,         
+                     tf.cast(tf.less(r_diff, 0), tf.float64) + -1 * tf.cast(tf.greater(r_diff, 0), tf.float64)
+                )
+#        1\
+#                K.losses.mse(
+#                        tf.nn.softmax(y_pred[0,:]), 
+#                        tf.nn.softmax(y_pred[1,:]))
 #        K.losses.mse(
 #                        y_pred[1,:],
 #                        y_pred[0,:]
