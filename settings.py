@@ -10,7 +10,7 @@ class Settings:
     LR = 0.0001
     BATCH_SIZE = 10
     TRAIN_STEPS_N = 5000
-    TRAIN_EPOCHS_N = 5
+    TRAIN_EPOCHS_N = 20
 
     SIGMA = 0.5
 

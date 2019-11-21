@@ -96,22 +96,22 @@ class Model:
                 validation_steps=10,
                 callbacks=[tensorboard_callback]
             )
-        data, _ = next(self._vars_input_generator(True))
-        outputs = self._model.predict_generator(
-                self._vars_input_generator(True),
-                steps=1)
-        print("\n")
-        print("e sim\t{}".format("\t".join(map(lambda x: "{:.3f}".format(x),  outputs[0]))))
-        print("v sim\t{}".format("\t".join(map(lambda x: "{:.3f}".format(x),  outputs[1]))))
-        print("\n")
-        print("\n")
-        print("e sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
-              np.argsort(outputs[0])))))
-        print("v sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
-              np.argsort(outputs[1])))))
-        print("\n")
-        
-        exit(0)
+#        data, _ = next(self._vars_input_generator(True))
+#        outputs = self._model.predict_generator(
+#                self._vars_input_generator(True),
+#                steps=1)
+#        print("\n")
+#        print("e sim\t{}".format("\t".join(map(lambda x: "{:.3f}".format(x),  outputs[0]))))
+#        print("v sim\t{}".format("\t".join(map(lambda x: "{:.3f}".format(x),  outputs[1]))))
+#        print("\n")
+#        print("\n")
+#        print("e sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
+#              np.argsort(outputs[0]).argsort()))))
+#        print("v sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
+#              np.argsort(outputs[1]).argsort()))))
+#        print("\n")
+#        
+#        exit(0)
         self._model.save("last.model.h5")
 
     def summary(self):
@@ -427,8 +427,8 @@ class Model:
         
         def rank_match(y_true, y_pred):
             
-            e_ranks = tf.cast(tf.argsort(y_pred[0,:]), tf.float64)
-            v_ranks = tf.cast(tf.argsort(y_pred[1,:]), tf.float64)
+            e_ranks = tf.cast(tf.argsort(tf.argsort(y_pred[0,:])), tf.float64)
+            v_ranks = tf.cast(tf.argsort(tf.argsort(y_pred[1,:])), tf.float64)
             ranks_diff = tf.abs(e_ranks-v_ranks)
             
             return tf.reduce_sum(ranks_diff) / Settings.BATCH_SIZE
