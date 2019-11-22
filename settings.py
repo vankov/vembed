@@ -3,14 +3,14 @@
 class Settings:
     N_SLOTS = 4
     MAX_ARITY = 2
-    SEM_DIM = 10
-    EMBDED_DIM = 50
-    HIDDEN_UNITS_N = 100
+    SEM_DIM = 50
+    EMBDED_DIM = 100
+    HIDDEN_UNITS_N = 400
     RECODE_HIDDEN_UNITS_N = 50
     LR = 0.0001
-    BATCH_SIZE = 10
-    TRAIN_STEPS_N = 5000
-    TRAIN_EPOCHS_N = 10
+    BATCH_SIZE = 100
+    TRAIN_STEPS_N = 1000
+    TRAIN_EPOCHS_N = 200
 
     SIGMA = 0.5
 

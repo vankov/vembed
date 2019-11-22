@@ -35,9 +35,8 @@ from settings import Settings
 class Model:
 
 
-    def _vars_input_generator(self, fix_target = False):
-        sim_targets = np.ones(shape=(Settings.BATCH_SIZE),
-                dtype=np.float64)
+    def _vars_input_generator(self, batch_size, fix_target = False):
+        sim_targets = np.ones(shape=(batch_size), dtype=np.float32)
 
 #        recode_targets = np.zeros(
 #                shape=(
@@ -46,40 +45,35 @@ class Model:
         
         vars_input = np.zeros(
                 shape=(
-                    Settings.BATCH_SIZE,
+                    batch_size,
                     Settings.VARS_TOTAL_DIM,
                     2),
-                dtype=np.float64)
+                dtype=np.float32)
         
-        is_target_populated = False
         
         while(True):
-
-            if is_target_populated and fix_target:                
-                target_base = [1]
-            else:
-                target_base = [0, 1]
-                
-            is_target_populated = True
             
-            vars_input[:,:Settings.VARS_SEM_DIM,target_base] = np.random.uniform(
+            vars_input[:,:Settings.VARS_SEM_DIM,:] = np.random.uniform(
                 low=0,
                 high=1,
                 size=(
-                    Settings.BATCH_SIZE,
+                    batch_size,
                     Settings.VARS_SEM_DIM,
-                    len(target_base)))
+                    2))
             
             
-            vars_input[:,Settings.VARS_SEM_DIM:,target_base] = np.random.choice(
-                    [-1, 1],
+            vars_input[:,Settings.VARS_SEM_DIM:,:] = np.random.choice(
+                    [0, 1],
                     replace=True,
-                    p=[0.1, 0.9],
+                    p=[0.9, 0.1],
                     size=(
-                        Settings.BATCH_SIZE,
+                        batch_size,
                         Settings.VARS_TOTAL_DIM - Settings.VARS_SEM_DIM,
-                        len(target_base)))
-            
+                        2))
+
+            if fix_target:
+                vars_input[:,:,0] = vars_input[0,:,0]
+
             yield vars_input, sim_targets#,sim_targets]#, recode_targets]
 
     def train(self):
@@ -87,38 +81,20 @@ class Model:
         tensorboard_callback = K.callbacks.TensorBoard(log_dir=logdir)
 
         self._model.fit_generator(
-                self._vars_input_generator(True),
+                self._vars_input_generator(
+                        batch_size=Settings.BATCH_SIZE,
+                        fix_target=True),
                 steps_per_epoch=Settings.TRAIN_STEPS_N,
                 epochs=Settings.TRAIN_EPOCHS_N,
                 verbose=1,
-                validation_data=self._vars_input_generator(fix_target=True),
+                validation_data=self._vars_input_generator(
+                        batch_size=Settings.BATCH_SIZE,
+                        fix_target=True),
                 validation_steps=10,
                 callbacks=[tensorboard_callback]
             )
-        data, _ = next(self._vars_input_generator(True))
-        outputs = self._model.predict_generator(
-                self._vars_input_generator(True),
-                steps=1)
-        print("\n")
-        print("e sim\t{}".format("\t".join(map(lambda x: "{:.3f}".format(x),  outputs[0]))))
-        print("v sim\t{}".format("\t".join(map(lambda x: "{:.3f}".format(x),  outputs[1]))))
-        print("\n")
-        print("\n")
-        print("e sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
-              np.argsort(outputs[0])))))
-        print("v sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
-              np.argsort(outputs[1])))))
-        print("\n")
+
         
-        print("\n")
-        print("e sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
-              np.argsort(outputs[0]).argsort()))))
-        print("v sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
-              np.argsort(outputs[1]).argsort()))))
-        print("\n")
-#        
-#        exit(0)
-        self._model.save("last.model.h5")
 
     def summary(self):
         return self._model.summary()
@@ -152,7 +128,7 @@ class Model:
         for positions in self.__construct_recode_mat_aux(0, state):
             recode_mat[i] = diag_mat[:][positions]
             i += 1
-        return tf.convert_to_tensor(recode_mat, dtype=np.float64)
+        return tf.convert_to_tensor(recode_mat, dtype=np.float32)
 
     def _get_recode_matrix(self):
         """
@@ -168,12 +144,12 @@ class Model:
             with open(
                     "recode/recode_mat.{}.pickle".format(Settings.N_SLOTS),
                     "rb") as file_h:
-                recode_mat = tf.constant(pickle.load(file_h), dtype=np.float64)
+                recode_mat = tf.constant(pickle.load(file_h), dtype=np.float32)
             print("Done.")
             sys.stdout.flush()
         else:
             #create recoding matrix and serialize it to a file
-            recode_mat = tf.constant(self.__construct_recode_mat(), dtype=tf.float64)
+            recode_mat = tf.constant(self.__construct_recode_mat(), dtype=tf.float32)
             with open(
                     "recode/recode_mat.{}.pickle".format(Settings.N_SLOTS),
                     "wb") as file_h:
@@ -327,7 +303,7 @@ class Model:
 
     def _build_model(self):
 
-        K.backend.set_floatx('float64')
+        K.backend.set_floatx('float32')
         
         VARS_input = K.layers.Input(
                 shape=(Settings.VARS_TOTAL_DIM,2,),
@@ -420,10 +396,10 @@ class Model:
             return tf.py_function(
                         spearmanr, 
                         [
-                            tf.cast(y_pred[0, :], tf.float64), 
-                            tf.cast(y_pred[1, :], tf.float64)
+                            tf.cast(y_pred[0, :], tf.float32), 
+                            tf.cast(y_pred[1, :], tf.float32)
                         ], 
-                        Tout = tf.float64)
+                        Tout = tf.float32)
             
         def std_vaars(y_true, y_pred):
             return tf.math.reduce_min(tf.math.l2_normalize(y_pred[1]))
@@ -433,22 +409,43 @@ class Model:
         
         def rank_match(y_true, y_pred):
             
-            e_ranks = tf.cast(tf.argsort(tf.argsort(y_pred[0,:])), tf.float64)
-            v_ranks = tf.cast(tf.argsort(tf.argsort(y_pred[1,:])), tf.float64)
+            e_ranks = tf.cast(tf.argsort(tf.argsort(y_pred[0,:])), tf.float32)
+            v_ranks = tf.cast(tf.argsort(tf.argsort(y_pred[1,:])), tf.float32)
             ranks_diff = tf.abs(e_ranks-v_ranks)
             
-            return tf.reduce_sum(ranks_diff) / Settings.BATCH_SIZE
-#                        tf.math.less(ranks_diff, 2), dtype=tf.float64)
+            return tf.reduce_mean(ranks_diff) / Settings.BATCH_SIZE
+#                        tf.math.less(ranks_diff, 2), dtype=tf.float32)
 #                        ) / e_ranks.shape[0]
                 
-        #tf.reduce_mean(tf.cast(ranks_diff, dtype=tf.float64))
-#                    tf.cast(tf.math.less(ranks_diff, 5), dtype=tf.float64))
+        #tf.reduce_mean(tf.cast(ranks_diff, dtype=tf.float32))
+#                    tf.cast(tf.math.less(ranks_diff, 5), dtype=tf.float32))
             #tf.cast(tf.constant(list(range(0, 100))), tf.float32)
             #tf.cast(tf.argsort(y_pred[1,:]), tf.float32)
             
 #            return tf.reduce_mean(-K.losses.cosine_similarity(e_ranks, v_ranks))
 #        tf.reduce_mean(
 #                    tf.cast(tf.abs(e_ranks - v_ranks), dtype=tf.float32))
+
+        def top_10(y_true, y_pred):
+            targets = tf.one_hot(
+                    tf.argmax(y_pred[1,:]), 
+                    y_pred[1,:].shape[0],
+                    dtype=tf.float32)
+            
+            targets = tf.one_hot(
+                    100, 
+                    Settings.BATCH_SIZE,
+                    dtype=tf.float32)
+            
+            targets = tf.expand_dims(targets, axis=0)
+            
+            outputs = tf.expand_dims(y_pred[0,:], axis=0)
+
+                            
+            return K.metrics.top_k_categorical_accuracy(
+                        targets, 
+                        outputs, 
+                        k=10)
             
         def loss_f(y_true, y_pred):
             
@@ -457,11 +454,11 @@ class Model:
             s_r = tf.argsort(tf.argsort(s_out))
             v_r = tf.argsort(tf.argsort(v_out))
             
-            r_diff = tf.cast(s_r - v_r, tf.float64)
+            r_diff = tf.cast(s_r - v_r, tf.float32)
             
             return K.losses.mse(
                     s_out,         
-                     tf.cast(tf.less(r_diff, 0), tf.float64) + -1 * tf.cast(tf.greater(r_diff, 0), tf.float64)
+                     tf.cast(tf.less(r_diff, 0), tf.float32) + -1 * tf.cast(tf.greater(r_diff, 0), tf.float32)
                 )
 #        1\
 #                K.losses.mse(
@@ -482,15 +479,42 @@ class Model:
         self._model.compile(
                 loss={
                     #"mse": lambda y_true, y_pred: 0.0,#tf.reduce_mean(y_pred),
-                    "sim": loss_f,
+                    "sim": lambda y_true, y_pred: K.losses.mse(y_pred[0,:], y_pred[1,:]),
                 },
                 optimizer=K.optimizers.RMSprop(lr = Settings.LR),
-                metrics={"sim": [spearman_corel, rank_match]}
+                metrics={"sim": [spearman_corel, top_10]}
             
                 )
 
     def save(self):
-        pass
+        self._model.save_weights("last.model.h5")
+
+    def load(self):
+        self._model.load_weights("last.model.h5");
+    def test(self):
+        data_gen = self._vars_input_generator(
+                        batch_size=10,
+                        fix_target=False)
+        
+        outputs = self._model.predict(data_gen, steps=1)
+        
+        print("\n")
+        print("e sim\t{}".format("\t".join(map(lambda x: "{:.3f}".format(x),  outputs[0]))))
+        print("v sim\t{}".format("\t".join(map(lambda x: "{:.3f}".format(x),  outputs[1]))))
+        print("\n")
+        print("\n")
+        print("e sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
+              np.argsort(outputs[0])))))
+        print("v sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
+              np.argsort(outputs[1])))))
+        print("\n")
+        
+        print("\n")
+        print("e sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
+              np.argsort(outputs[0]).argsort()))))
+        print("v sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
+              np.argsort(outputs[1]).argsort()))))
+        print("\n")
 
     def save_model_image(self, filename):
         K.utils.plot_model(self._model, to_file=filename)

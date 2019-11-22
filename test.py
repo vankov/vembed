@@ -10,8 +10,5 @@ tf.compat.v1.disable_eager_execution()
 
 model = Model()
 
-
-model.train()
-
-#print(model.summary())
-#model.save_model_image("model.png")
+model.load()
+model.test()
