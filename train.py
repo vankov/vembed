@@ -12,6 +12,7 @@ model = Model()
 
 
 model.train()
+model.save()
 
 #print(model.summary())
 #model.save_model_image("model.png")

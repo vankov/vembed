@@ -53,9 +53,9 @@ class Model:
         
         while(True):
             
-            vars_input[:,:Settings.VARS_SEM_DIM,:] = np.random.uniform(
-                low=0,
-                high=1,
+            vars_input[:,:Settings.VARS_SEM_DIM,:] = np.random.normal(
+                loc=0,
+                scale=5,
                 size=(
                     batch_size,
                     Settings.VARS_SEM_DIM,
@@ -63,7 +63,7 @@ class Model:
             
             
             vars_input[:,Settings.VARS_SEM_DIM:,:] = np.random.choice(
-                    [0, 1],
+                    [-1, 1],
                     replace=True,
                     p=[0.9, 0.1],
                     size=(
@@ -90,8 +90,11 @@ class Model:
                 validation_data=self._vars_input_generator(
                         batch_size=Settings.BATCH_SIZE,
                         fix_target=True),
-                validation_steps=10,
-                callbacks=[tensorboard_callback]
+                validation_steps=100,
+                callbacks=[tensorboard_callback],
+                max_queue_size=1, 
+                workers=1, 
+                use_multiprocessing=False                
             )
 
         
@@ -284,9 +287,11 @@ class Model:
             ])
 
         #compute cosine similarity
-        sem_cos = -K.losses.cosine_similarity(target_sem, base_sem, axis=[2])
+        sem_cos = tf.norm(target_sem - base_sem, axis=2)
+        #-K.losses.cosine_similarity(target_sem, base_sem, axis=[2])
         #compute cosine similarity
-        struct_cos = -K.losses.cosine_similarity(target_struct, base_struct, axis=[2])
+        struct_cos = tf.norm(target_struct - base_struct, axis=2)
+        #-K.losses.cosine_similarity(target_struct, base_struct, axis=[2])
         
         similarities = tf.add(
                 sem_cos * (1 - Settings.SIGMA), 
@@ -312,9 +317,15 @@ class Model:
         
         hidden_layer = K.layers.Dense(
                 activation="relu",
-                kernel_regularizer=K.regularizers.l2(0.001),
+#                kernel_regularizer=K.regularizers.l2(0.001),
                 units=Settings.HIDDEN_UNITS_N,
                 name='hidden_layer')        
+
+        hidden_layer2 = K.layers.Dense(
+                activation="relu",
+#                kernel_regularizer=K.regularizers.l2(0.001),
+                units=Settings.HIDDEN_UNITS_N,
+                name='hidden_layer2')     
         
         embed_layer = K.layers.Dense(
                 activation="linear",
@@ -325,8 +336,8 @@ class Model:
         vars1 = tf.squeeze(tf.gather(VARS_input, [0], axis=-1), axis=-1)
         vars2 = tf.squeeze(tf.gather(VARS_input, [1], axis=-1), axis=-1)
 
-        hidden_state1 = hidden_layer(vars1)
-        hidden_state2 = hidden_layer(vars2)
+        hidden_state1 = hidden_layer2(hidden_layer(vars1))
+        hidden_state2 = hidden_layer2(hidden_layer(vars2))
 
         embedding1 = embed_layer(hidden_state1)
         embedding2 = embed_layer(hidden_state2)
@@ -339,11 +350,18 @@ class Model:
 #                        K.layers.concatenate(
 #                                [embedding1, embedding2], axis=-1))
 
-        output_similarity = K.layers.dot(
-                [embedding1, embedding2],
-                axes=-1,
-                normalize=True,
-                name="e_sim")
+        euclidian_dist = tf.norm(embedding1 - embedding2, axis=-1)
+#        print(euclidian_dist)
+        
+        output_similarity = K.layers.Lambda(
+                    lambda x: x, 
+                    name="e_sim"
+                )(euclidian_dist)
+#        K.layers.dot(
+#                [embedding1, embedding2],
+#                axes=-1,
+#                normalize=False,
+#                name="e_sim")
 
 #        output_recode = K.layers.Dense(
 #                units = self._n_states,
@@ -355,7 +373,7 @@ class Model:
         
         sim_tensor = tf.stack(
                 [
-                        tf.squeeze(output_similarity, axis=-1), 
+                        output_similarity, 
                         vaar_similarity
                 ])
     
@@ -426,27 +444,27 @@ class Model:
 #        tf.reduce_mean(
 #                    tf.cast(tf.abs(e_ranks - v_ranks), dtype=tf.float32))
 
-        def top_10(y_true, y_pred):
-            targets = tf.one_hot(
-                    tf.argmax(y_pred[1,:]), 
-                    y_pred[1,:].shape[0],
-                    dtype=tf.float32)
-            
-            targets = tf.one_hot(
-                    100, 
-                    Settings.BATCH_SIZE,
-                    dtype=tf.float32)
-            
-            targets = tf.expand_dims(targets, axis=0)
-            
-            outputs = tf.expand_dims(y_pred[0,:], axis=0)
-
-                            
+        def top_1(y_true, y_pred):
             return K.metrics.top_k_categorical_accuracy(
-                        targets, 
-                        outputs, 
-                        k=10)
-            
+                        tf.expand_dims(
+                            tf.one_hot(
+                                tf.argmax(y_pred[1,:]), 
+                                y_pred[1,:].shape[0],
+                                dtype=tf.float32), axis=0),
+                        tf.expand_dims(y_pred[0,:], axis=0), 
+                        k=1)
+        
+        def top_rank_distance(_, y_pred):
+            s_out = y_pred[0, :]
+            v_out = y_pred[1, :]
+            s_r = tf.argsort(tf.argsort(s_out))
+            v_r = tf.argsort(tf.argsort(v_out))
+
+            v_max_arg = tf.argmax(v_r)
+            return tf.abs(
+                        tf.gather(v_r, v_max_arg) 
+                        - tf.gather(s_r, v_max_arg)) / v_out.shape[0]
+        
         def loss_f(y_true, y_pred):
             
             s_out = y_pred[0, :]
@@ -479,10 +497,10 @@ class Model:
         self._model.compile(
                 loss={
                     #"mse": lambda y_true, y_pred: 0.0,#tf.reduce_mean(y_pred),
-                    "sim": lambda y_true, y_pred: K.losses.mse(y_pred[0,:], y_pred[1,:]),
+                    "sim": lambda y_true, y_pred:-pearson_corel(y_true, y_pred),#lambda y_true, y_pred: K.losses.mse(y_pred[0,:], y_pred[1,:]),
                 },
                 optimizer=K.optimizers.RMSprop(lr = Settings.LR),
-                metrics={"sim": [spearman_corel, top_10]}
+                metrics={"sim": [spearman_corel, top_1, top_rank_distance]}
             
                 )
 
@@ -491,31 +509,60 @@ class Model:
 
     def load(self):
         self._model.load_weights("last.model.h5");
+        
+    def print_vars_distr(self):
+        data = next(self._vars_input_generator(
+                        batch_size=100,
+                        fix_target=True))
+        
+        
+        print(np.mean(data[0][:,:,1]))
+        print(np.std(data[0][:,0,0]))
+        print(np.min(data[0][:,:,1]))
+        print(np.max(data[0][:,:,1]))
+        
+        exit(0)
+        
     def test(self):
         data_gen = self._vars_input_generator(
-                        batch_size=10,
-                        fix_target=False)
+                        batch_size=Settings.BATCH_SIZE,
+                        fix_target=True)
         
-        outputs = self._model.predict(data_gen, steps=1)
+        rank_d = []
+        reps = 10
         
-        print("\n")
-        print("e sim\t{}".format("\t".join(map(lambda x: "{:.3f}".format(x),  outputs[0]))))
-        print("v sim\t{}".format("\t".join(map(lambda x: "{:.3f}".format(x),  outputs[1]))))
-        print("\n")
-        print("\n")
-        print("e sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
-              np.argsort(outputs[0])))))
-        print("v sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
-              np.argsort(outputs[1])))))
-        print("\n")
-        
-        print("\n")
-        print("e sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
-              np.argsort(outputs[0]).argsort()))))
-        print("v sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
-              np.argsort(outputs[1]).argsort()))))
-        print("\n")
+#        print(outputs)
+        for _ in range(reps):
+            outputs = self._model.predict(
+                    data_gen, 
+                    steps=1, 
+                    max_queue_size=1, 
+                    workers=1, 
+                    use_multiprocessing=False)
+            output_ranks = np.argsort(outputs[0]).argsort()
+            vaar_ranks = np.argsort(outputs[1]).argsort()
+            
+            print(outputs[0])
+            print(outputs[1])
+            print("\n")
+            rank_d.append(vaar_ranks[np.argmax(vaar_ranks)] - output_ranks[np.argmax(vaar_ranks)])
+            
+#            print("\n")
+#            print("e sim\t{}".format("\t".join(map(lambda x: "{:.3f}".format(x),  outputs[0]))))
+#            print("v sim\t{}".format("\t".join(map(lambda x: "{:.3f}".format(x),  outputs[1]))))
+#            
+#            print("\n")
+#            print("e sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
+#                  np.argsort(outputs[0]).argsort()))))
+#            print("v sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
+#                  np.argsort(outputs[1]).argsort()))))
+#            print("\n")
 
+        print("\n")
+        print("Mean rank offset: {:.2f}".format(np.mean(rank_d)))
+        print("Rank matches    : {:.2f}%".format(
+                (np.where(np.array(rank_d) == 0)[0].shape[0] * 100) / float(reps)))
+        
     def save_model_image(self, filename):
         K.utils.plot_model(self._model, to_file=filename)
 

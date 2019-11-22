@@ -11,4 +11,4 @@ tf.compat.v1.disable_eager_execution()
 model = Model()
 
 model.load()
-model.test()
+model.print_vars_distr()
