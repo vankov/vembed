@@ -12,85 +12,28 @@ from scipy.stats import spearmanr
 from pathlib import Path
 
 from settings import Settings
-
-#class VAARSimilarityLoss(K.losses.Loss):
-#
-#    def __init__(self, output_similarity, reduction=tf.keras.losses.Reduction.AUTO, name='VAARSimilarityLoss'):
-#        super().__init__(reduction=reduction, name=name)
-#        self.output_similarity = output_similarity
-#
-#    def sdr_loss(self, sig_true, sig_pred):
-#        return (-tf.reduce_mean(sig_true * sig_pred) /
-#                (tf.norm(tensor=sig_pred) * tf.norm(tensor=sig_true)))
-#
-#    def call(self, y_true, y_pred):
-#        noise_true = self.noisy_signal - y_true
-#        noise_pred = self.noisy_signal - y_pred
-#        alpha = (tf.reduce_mean(tf.square(y_true)) /
-#                 tf.reduce_mean(tf.square(y_true) + tf.square(self.noisy_signal - y_pred)))
-#        return
-#
-#    alpha * self.sdr_loss(y_true, y_pred) + (1 - alpha) * self.sdr_loss(noise_true, noise_pred)
+from data import VARSData
 
 class Model:
-
-
-    def _vars_input_generator(self, batch_size, fix_target = False):
-        sim_targets = np.ones(shape=(batch_size), dtype=np.float32)
-
-#        recode_targets = np.zeros(
-#                shape=(
-#                    Settings.BATCH_SIZE,
-#                    self._n_states))
-        
-        vars_input = np.zeros(
-                shape=(
-                    batch_size,
-                    Settings.VARS_TOTAL_DIM,
-                    2),
-                dtype=np.float32)
-        
-        
-        while(True):
-            
-            vars_input[:,:Settings.VARS_SEM_DIM,:] = np.random.normal(
-                loc=0,
-                scale=5,
-                size=(
-                    batch_size,
-                    Settings.VARS_SEM_DIM,
-                    2))
-            
-            
-            vars_input[:,Settings.VARS_SEM_DIM:,:] = np.random.choice(
-                    [-1, 1],
-                    replace=True,
-                    p=[0.9, 0.1],
-                    size=(
-                        batch_size,
-                        Settings.VARS_TOTAL_DIM - Settings.VARS_SEM_DIM,
-                        2))
-
-            if fix_target:
-                vars_input[:,:,0] = vars_input[0,:,0]
-
-            yield vars_input, sim_targets#,sim_targets]#, recode_targets]
 
     def train(self):
         logdir="logs/fit/" + datetime.now().strftime("%Y%m%d-%H%M%S")
         tensorboard_callback = K.callbacks.TensorBoard(log_dir=logdir)
 
-        self._model.fit_generator(
-                self._vars_input_generator(
+        train_gen = self._data.get_generator(
                         batch_size=Settings.BATCH_SIZE,
-                        fix_target=True),
+                        fixed_target=True)
+        
+        
+        self._model.fit_generator(
+                train_gen,
                 steps_per_epoch=Settings.TRAIN_STEPS_N,
                 epochs=Settings.TRAIN_EPOCHS_N,
                 verbose=1,
-                validation_data=self._vars_input_generator(
-                        batch_size=Settings.BATCH_SIZE,
-                        fix_target=True),
-                validation_steps=100,
+#                validation_data=self._data.get_generator(
+#                        batch_size=Settings.BATCH_SIZE,
+#                        fixed_target=True),
+#                validation_steps=100,
                 callbacks=[tensorboard_callback],
                 max_queue_size=1, 
                 workers=1, 
@@ -298,7 +241,7 @@ class Model:
                 struct_cos * Settings.SIGMA)
         
         #get maximum similarity
-        max_similarities = tf.reduce_max(similarities, axis=-1)
+        max_similarities = tf.reduce_min(similarities, axis=-1)
 
         #get the indices of the recoding which maximize similarity
         best_recodings = tf.argmax(similarities, axis=-1)
@@ -445,14 +388,19 @@ class Model:
 #                    tf.cast(tf.abs(e_ranks - v_ranks), dtype=tf.float32))
 
         def top_1(y_true, y_pred):
-            return K.metrics.top_k_categorical_accuracy(
-                        tf.expand_dims(
-                            tf.one_hot(
-                                tf.argmax(y_pred[1,:]), 
-                                y_pred[1,:].shape[0],
-                                dtype=tf.float32), axis=0),
-                        tf.expand_dims(y_pred[0,:], axis=0), 
-                        k=1)
+            return tf.cast(
+                    tf.equal(
+                        tf.argmin(y_pred[0, :]),
+                        tf.argmin(y_pred[1, :])),
+                    tf.float32)
+#        K.metrics.top_k_categorical_accuracy(
+#                        tf.expand_dims(
+#                            tf.one_hot(
+#                                tf.argmax(y_pred[1,:]), 
+#                                y_pred[1,:].shape[0],
+#                                dtype=tf.float32), axis=0),
+#                        tf.expand_dims(y_pred[0,:], axis=0), 
+#                        k=1)
         
         def top_rank_distance(_, y_pred):
             s_out = y_pred[0, :]
@@ -460,10 +408,10 @@ class Model:
             s_r = tf.argsort(tf.argsort(s_out))
             v_r = tf.argsort(tf.argsort(v_out))
 
-            v_max_arg = tf.argmax(v_r)
+            v_min_arg = tf.argmin(v_r)
             return tf.abs(
-                        tf.gather(v_r, v_max_arg) 
-                        - tf.gather(s_r, v_max_arg)) / v_out.shape[0]
+                        tf.gather(v_r, v_min_arg) 
+                        - tf.gather(s_r, v_min_arg)) / v_out.shape[0]
         
         def loss_f(y_true, y_pred):
             
@@ -507,45 +455,45 @@ class Model:
     def save(self):
         self._model.save_weights("last.model.h5")
 
-    def load(self):
-        self._model.load_weights("last.model.h5");
+    def load(self, filename="last.model.h5"):
+        self._model.load_weights(filename)
         
     def print_vars_distr(self):
-        data = next(self._vars_input_generator(
+        data = next(self._data.get_generator(
                         batch_size=100,
-                        fix_target=True))
+                        fixed_target=True))
         
         
         print(np.mean(data[0][:,:,1]))
-        print(np.std(data[0][:,0,0]))
+        print(np.std(data[0][:,:,1]))
         print(np.min(data[0][:,:,1]))
         print(np.max(data[0][:,:,1]))
         
         exit(0)
         
     def test(self):
-        data_gen = self._vars_input_generator(
+        data_gen = self._data.get_generator(
                         batch_size=Settings.BATCH_SIZE,
-                        fix_target=True)
+                        fixed_target=True)
         
         rank_d = []
-        reps = 10
+        reps = 1000
         
 #        print(outputs)
         for _ in range(reps):
             outputs = self._model.predict(
                     data_gen, 
                     steps=1, 
-                    max_queue_size=1, 
-                    workers=1, 
+                    max_queue_size=10, 
+                    workers=10, 
                     use_multiprocessing=False)
             output_ranks = np.argsort(outputs[0]).argsort()
             vaar_ranks = np.argsort(outputs[1]).argsort()
             
-            print(outputs[0])
-            print(outputs[1])
-            print("\n")
-            rank_d.append(vaar_ranks[np.argmax(vaar_ranks)] - output_ranks[np.argmax(vaar_ranks)])
+#            print(output_ranks)
+#            print(vaar_ranks)
+#            print("\n")
+            rank_d.append(output_ranks[np.argmin(vaar_ranks)])
             
 #            print("\n")
 #            print("e sim\t{}".format("\t".join(map(lambda x: "{:.3f}".format(x),  outputs[0]))))
@@ -571,4 +519,5 @@ class Model:
         self._n_states = int(factorial(Settings.N_SLOTS))
         self._recode_mat = self._get_recode_matrix()
         self._build_model()
+        self._data = VARSData()
 

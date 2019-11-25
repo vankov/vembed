@@ -10,7 +10,7 @@ tf.compat.v1.disable_eager_execution()
 
 model = Model()
 
-
+#model.load()
 model.train()
 model.save()
 
