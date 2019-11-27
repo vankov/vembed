@@ -107,17 +107,27 @@ class Model:
         vars_sem = tf.gather(
                 tf.reshape(
                     vars_tensor,
-                    [Settings.BATCH_SIZE, Settings.VARS_TOTAL_DIM]
+                    [
+                        Settings.BATCH_SIZE, 
+                        Settings.N_SLOTS, 
+                        Settings.SEM_DIM + Settings.MAX_ARITY * Settings.N_SLOTS
+                    ]
                 ),
-                list(range(Settings.VARS_SEM_DIM)),
+                list(range(Settings.SEM_DIM)),
                 axis=-1)
 
         vars_struct = tf.gather(
                 tf.reshape(
                     vars_tensor,
-                    [Settings.BATCH_SIZE, Settings.VARS_TOTAL_DIM]
+                    [
+                        Settings.BATCH_SIZE, 
+                        Settings.N_SLOTS, 
+                        Settings.SEM_DIM + Settings.MAX_ARITY * Settings.N_SLOTS                            
+                    ]
                 ),
-                list(range(Settings.VARS_SEM_DIM, Settings.VARS_TOTAL_DIM)),
+                list(range(
+                    Settings.SEM_DIM, 
+                    Settings.SEM_DIM + Settings.MAX_ARITY * Settings.N_SLOTS)),
                 axis=-1)
 
         return vars_sem, vars_struct
@@ -197,11 +207,14 @@ class Model:
         base_sem, base_struct = self.get_vars_comps(base_vars)
 
         #generate all possible states of the semantics of the target
+        
         target_sem = tf.map_fn(recode_sem_target_func, target_sem)
 
         #generate all possible states of the structure of the target
         target_struct = tf.map_fn(recode_struct_target_func, target_struct)
 
+        
+        
         #reshapoe bases
         base_sem = tf.reshape(
             tf.tile(
@@ -213,6 +226,7 @@ class Model:
                             ]),
                     [1, self._n_states]),
             [Settings.BATCH_SIZE, self._n_states, Settings.VARS_SEM_DIM])
+
 
         base_struct = tf.reshape(
             tf.tile(
@@ -230,10 +244,10 @@ class Model:
             ])
 
         #compute cosine similarity
-        sem_cos = tf.norm(target_sem - base_sem, axis=2)
+        sem_cos = tf.norm(target_sem - base_sem, axis=-1)
         #-K.losses.cosine_similarity(target_sem, base_sem, axis=[2])
         #compute cosine similarity
-        struct_cos = tf.norm(target_struct - base_struct, axis=2)
+        struct_cos = tf.norm(target_struct - base_struct, axis=-1)
         #-K.losses.cosine_similarity(target_struct, base_struct, axis=[2])
         
         similarities = tf.add(
@@ -249,6 +263,14 @@ class Model:
         return max_similarities, best_recodings
 
 
+    @tf.function
+    def make_analogy(self, targets, bases):
+                
+        vaar_similarity, vaar_recoding = self._get_vaar(
+                targets, bases)
+        
+        return vaar_similarity
+    
     def _build_model(self):
 
         K.backend.set_floatx('float32')
@@ -272,6 +294,7 @@ class Model:
         
         embed_layer = K.layers.Dense(
                 activation="linear",
+                kernel_regularizer=K.regularizers.l2(0.001),
                 units=Settings.EMBDED_DIM,
                 name='embed_layer')
 
@@ -402,7 +425,7 @@ class Model:
 #                        tf.expand_dims(y_pred[0,:], axis=0), 
 #                        k=1)
         
-        def top_rank_distance(_, y_pred):
+        def top1_d(_, y_pred):
             s_out = y_pred[0, :]
             v_out = y_pred[1, :]
             s_r = tf.argsort(tf.argsort(s_out))
@@ -448,7 +471,7 @@ class Model:
                     "sim": lambda y_true, y_pred:-pearson_corel(y_true, y_pred),#lambda y_true, y_pred: K.losses.mse(y_pred[0,:], y_pred[1,:]),
                 },
                 optimizer=K.optimizers.RMSprop(lr = Settings.LR),
-                metrics={"sim": [spearman_corel, top_1, top_rank_distance]}
+                metrics={"sim": [spearman_corel, top_1, top1_d]}
             
                 )
 
@@ -471,45 +494,15 @@ class Model:
         
         exit(0)
         
-    def test(self):
-        data_gen = self._data.get_generator(
-                        batch_size=Settings.BATCH_SIZE,
-                        fixed_target=True)
+    def test(self, data_gen):
         
-        rank_d = []
-        reps = 1000
-        
-#        print(outputs)
-        for _ in range(reps):
-            outputs = self._model.predict(
+        while(True):
+            yield self._model.predict(
                     data_gen, 
                     steps=1, 
                     max_queue_size=10, 
                     workers=10, 
                     use_multiprocessing=False)
-            output_ranks = np.argsort(outputs[0]).argsort()
-            vaar_ranks = np.argsort(outputs[1]).argsort()
-            
-#            print(output_ranks)
-#            print(vaar_ranks)
-#            print("\n")
-            rank_d.append(output_ranks[np.argmin(vaar_ranks)])
-            
-#            print("\n")
-#            print("e sim\t{}".format("\t".join(map(lambda x: "{:.3f}".format(x),  outputs[0]))))
-#            print("v sim\t{}".format("\t".join(map(lambda x: "{:.3f}".format(x),  outputs[1]))))
-#            
-#            print("\n")
-#            print("e sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
-#                  np.argsort(outputs[0]).argsort()))))
-#            print("v sim r\t{}".format("\t".join(map(lambda x: "{}".format(x),  
-#                  np.argsort(outputs[1]).argsort()))))
-#            print("\n")
-
-        print("\n")
-        print("Mean rank offset: {:.2f}".format(np.mean(rank_d)))
-        print("Rank matches    : {:.2f}%".format(
-                (np.where(np.array(rank_d) == 0)[0].shape[0] * 100) / float(reps)))
         
     def save_model_image(self, filename):
         K.utils.plot_model(self._model, to_file=filename)
