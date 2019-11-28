@@ -4,9 +4,8 @@ class Settings:
     N_SLOTS = 6
     MAX_ARITY = 2
     SEM_DIM = 50
-    EMBDED_DIM = 128 * 4
-    HIDDEN_UNITS_N = 1024 * 2
-    RECODE_HIDDEN_UNITS_N = 50
+    EMBDED_DIM = 128 * 2
+    HIDDEN_UNITS_N = 1024
     LR = 0.0001
     BATCH_SIZE = 2000
     TRAIN_STEPS_N = 1000
@@ -16,11 +15,6 @@ class Settings:
 
     VARS_TOTAL_DIM = 0
     VARS_SEM_DIM = 0
-
-    N_SYMBOLS = 100000
-    BINARY_SYMBOLS_FREQ = 0.2
-    UNARY_SYMBOLS_FREQ = 0.2
-    ATOM_SYMBOLS_FREQ = 0.6
 
     EMBEDDINGS_FILENAME = "embeddings.npy"
 

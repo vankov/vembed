@@ -174,12 +174,17 @@ class Model:
                                                     tf.reshape(
                                                         vars_struct,
                                                         [
-                                                            Settings.MAX_ARITY,
                                                             Settings.N_SLOTS,
-                                                            Settings.N_SLOTS
+                                                            Settings.MAX_ARITY
+                                                            * Settings.N_SLOTS
                                                         ]),
-                                                    [a_i],
-                                                    axis=0)
+                                                    list(
+                                                        range(
+                                                            a_i * Settings.N_SLOTS,
+                                                            (a_i + 1) * Settings.N_SLOTS
+                                                        )
+                                                    ),
+                                                    axis=1),
                                             ),
                                             [
                                                 self._n_states,
@@ -203,6 +208,7 @@ class Model:
                     ])
 
 
+        
         target_sem, target_struct = self.get_vars_comps(target_vars)
         base_sem, base_struct = self.get_vars_comps(base_vars)
 
@@ -210,10 +216,12 @@ class Model:
         
         target_sem = tf.map_fn(recode_sem_target_func, target_sem)
 
-        #generate all possible states of the structure of the target
-        target_struct = tf.map_fn(recode_struct_target_func, target_struct)
 
+
+        #generate all possible states of the structure of the target
+        #        print(target_struct)
         
+        target_struct = tf.map_fn(recode_struct_target_func, target_struct) 
         
         #reshapoe bases
         base_sem = tf.reshape(
@@ -227,36 +235,80 @@ class Model:
                     [1, self._n_states]),
             [Settings.BATCH_SIZE, self._n_states, Settings.VARS_SEM_DIM])
 
-
+        base_struct = tf.concat(
+                [
+                    tf.gather(
+                            tf.reshape(
+                                base_struct,
+                                [
+                                    Settings.BATCH_SIZE,
+                                    Settings.N_SLOTS,
+                                    Settings.MAX_ARITY * Settings.N_SLOTS
+                                ]),
+                           list(
+                                range(
+                                    a_i * Settings.N_SLOTS,
+                                    (a_i + 1) * Settings.N_SLOTS
+                                )
+                            ),
+                            axis=2
+                        )
+                    for a_i in range(Settings.MAX_ARITY)
+                ],
+                1)
+                
+                            
+        #        print(tf.reshape(
+        #                        base_struct,
+        #                        [
+        #                            Settings.BATCH_SIZE,
+        #                            Settings.N_SLOTS
+        #                            * Settings.MAX_ARITY 
+        #                            * Settings.N_SLOTS
+        #                        ]))
+        #                                                        
         base_struct = tf.reshape(
             tf.tile(
                     tf.reshape(
                         base_struct,
                         [
                             Settings.BATCH_SIZE,
-                            Settings.MAX_ARITY * tf.square(Settings.N_SLOTS)
+                            Settings.N_SLOTS
+                            * Settings.MAX_ARITY 
+                            * Settings.N_SLOTS
                         ]),
                     [1, self._n_states]),
             [
                 Settings.BATCH_SIZE,
                 self._n_states,
-                Settings.MAX_ARITY * tf.square(Settings.N_SLOTS)
+                Settings.N_SLOTS
+                * Settings.MAX_ARITY 
+                * Settings.N_SLOTS
             ])
 
+        #        print(target_sem)
+        #        print(target_struct)
+        #        
+        #        print(base_struct)
+
+                                                        
         #compute cosine similarity
         sem_cos = tf.norm(target_sem - base_sem, axis=-1)
         #-K.losses.cosine_similarity(target_sem, base_sem, axis=[2])
+        #tf.norm(target_sem - base_sem, axis=-1)
+        #
         #compute cosine similarity
         struct_cos = tf.norm(target_struct - base_struct, axis=-1)
         #-K.losses.cosine_similarity(target_struct, base_struct, axis=[2])
-        
+        #tf.norm(target_struct - base_struct, axis=-1)
         similarities = tf.add(
                 sem_cos * (1 - Settings.SIGMA), 
                 struct_cos * Settings.SIGMA)
-        
+
         #get maximum similarity
         max_similarities = tf.reduce_min(similarities, axis=-1)
-
+        #        print(struct_cos)
+        
         #get the indices of the recoding which maximize similarity
         best_recodings = tf.argmax(similarities, axis=-1)
 
@@ -294,7 +346,7 @@ class Model:
         
         embed_layer = K.layers.Dense(
                 activation="linear",
-                kernel_regularizer=K.regularizers.l2(0.001),
+#                kernel_regularizer=K.regularizers.l2(0.001),
                 units=Settings.EMBDED_DIM,
                 name='embed_layer')
 
@@ -309,13 +361,6 @@ class Model:
         embedding2 = embed_layer(hidden_state2)
 
 
-#        recode_hidden_layer = K.layers.Dense(
-#                activation="linear",
-#                units=Settings.RECODE_HIDDEN_UNITS_N,
-#                name='recode_hidden_layer')(
-#                        K.layers.concatenate(
-#                                [embedding1, embedding2], axis=-1))
-
         euclidian_dist = tf.norm(embedding1 - embedding2, axis=-1)
 #        print(euclidian_dist)
         
@@ -329,11 +374,6 @@ class Model:
 #                normalize=False,
 #                name="e_sim")
 
-#        output_recode = K.layers.Dense(
-#                units = self._n_states,
-#                activation = "softmax",
-#                name="recode_output")(recode_hidden_layer)
-
         vaar_similarity, vaar_recoding = self._get_vaar(vars1, vars2)
 
         
@@ -345,25 +385,6 @@ class Model:
     
         sim_output = K.layers.Lambda(lambda x: x, name="sim")(sim_tensor)
 
-#        similarity_corel = K.layers.Lambda(
-#                lambda x : x,
-#                name="corel")(tfp.stats.correlation(
-#                                output_similarity,
-#                                tf.expand_dims(vaar_similarity, 1),
-#                                sample_axis=0,
-#                                event_axis=None))
-#        
-#        similarity_mse = K.layers.Lambda(
-#                lambda x : x,
-#                name="mse")(K.losses.mse(
-#                                output_similarity,
-#                                tf.expand_dims(vaar_similarity, 1)))
-#        
-#        recode_match = K.layers.Lambda(
-#                lambda x : x,
-#                name="recode")(K.losses.mse(
-#                                output_recode,
-#                                tf.one_hot(vaar_recoding, self._n_states)))
         self._model = K.Model(
                 inputs=[VARS_input],
                 outputs=[sim_output],
@@ -398,17 +419,6 @@ class Model:
             ranks_diff = tf.abs(e_ranks-v_ranks)
             
             return tf.reduce_mean(ranks_diff) / Settings.BATCH_SIZE
-#                        tf.math.less(ranks_diff, 2), dtype=tf.float32)
-#                        ) / e_ranks.shape[0]
-                
-        #tf.reduce_mean(tf.cast(ranks_diff, dtype=tf.float32))
-#                    tf.cast(tf.math.less(ranks_diff, 5), dtype=tf.float32))
-            #tf.cast(tf.constant(list(range(0, 100))), tf.float32)
-            #tf.cast(tf.argsort(y_pred[1,:]), tf.float32)
-            
-#            return tf.reduce_mean(-K.losses.cosine_similarity(e_ranks, v_ranks))
-#        tf.reduce_mean(
-#                    tf.cast(tf.abs(e_ranks - v_ranks), dtype=tf.float32))
 
         def top_1(y_true, y_pred):
             return tf.cast(
@@ -416,14 +426,6 @@ class Model:
                         tf.argmin(y_pred[0, :]),
                         tf.argmin(y_pred[1, :])),
                     tf.float32)
-#        K.metrics.top_k_categorical_accuracy(
-#                        tf.expand_dims(
-#                            tf.one_hot(
-#                                tf.argmax(y_pred[1,:]), 
-#                                y_pred[1,:].shape[0],
-#                                dtype=tf.float32), axis=0),
-#                        tf.expand_dims(y_pred[0,:], axis=0), 
-#                        k=1)
         
         def top1_d(_, y_pred):
             s_out = y_pred[0, :]
@@ -449,22 +451,7 @@ class Model:
                     s_out,         
                      tf.cast(tf.less(r_diff, 0), tf.float32) + -1 * tf.cast(tf.greater(r_diff, 0), tf.float32)
                 )
-#        1\
-#                K.losses.mse(
-#                        tf.nn.softmax(y_pred[0,:]), 
-#                        tf.nn.softmax(y_pred[1,:]))
-#        K.losses.mse(
-#                        y_pred[1,:],
-#                        y_pred[0,:]
-#                    )
-#        tf.nn.softmax_cross_entropy_with_logits(y_pred[1,:], y_pred[0,:])
-        #K.losses.mse(y_pred[0,:], y_pred[1,:])
-#        -tfp.stats.correlation(
-#                    y_pred[0,:],
-#                    y_pred[1,:],
-#                    sample_axis=0,
-#                    event_axis=None)
-#            
+
         self._model.compile(
                 loss={
                     #"mse": lambda y_true, y_pred: 0.0,#tf.reduce_mean(y_pred),
