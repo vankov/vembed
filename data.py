@@ -55,25 +55,7 @@ class EmbeddingsData:
     def generate(dim, n, filename):
         data = np.random.uniform(size=(n, dim), low=0, high=1)
         np.save(Settings.EMBEDDINGS_FILENAME, data)
-
-class CategoryEmbeddings(EmbeddingsData):
-    
-    def get_random_from_cat(self, cat, n = 1, exclude_indices = []):
-        assert(cat in self.__cats)
-        
-        region = list(range(
-                floor(self.__cats[cat][0] * len(self._data)), 
-                floor(self.__cats[cat][1] * len(self._data))))
-            
-        return self.get_random(
-                n=n, 
-                exclude_indices=exclude_indices,
-                region=region)
-    
-    def __init__(self, cats):
-        super().__init__()
-        self.__cats = cats
-        
+       
 class VARSData:
 
     def print_vars(self, vars_r):
@@ -149,43 +131,9 @@ class VARSData:
                 yield vars_input, sim_targets
             
     def __init__(self):
-        cats = {
-                "atom": (0, Settings.ATOM_SYMBOLS_FREQ),
-                "unary": (
-                        Settings.ATOM_SYMBOLS_FREQ, 
-                        Settings.ATOM_SYMBOLS_FREQ 
-                            + Settings.UNARY_SYMBOLS_FREQ),
-                "binary": (
-                        Settings.ATOM_SYMBOLS_FREQ 
-                            + Settings.UNARY_SYMBOLS_FREQ,
-                        Settings.ATOM_SYMBOLS_FREQ 
-                            + Settings.UNARY_SYMBOLS_FREQ,
-                            + Settings.BINARY_SYMBOLS_FREQ
-                        )
-            }
-        self._embeddings = CategoryEmbeddings(cats = cats)
+        self._embeddings = EmbeddingsData()
         self._embeddings.load(Settings.EMBEDDINGS_FILENAME)
         self.lock = threading.Lock()
-        
-#vars_data = VARSData()
-##data = next(vars_data.get_generator(1, fixed_target=True))
-##vars_data.print_vars(data[0][0,:,0])
-#sems = []
-#structs = []
-#for _ in range(10000):
-#    data = vars_data.gen_random(2).reshape(
-#            2, 
-#            Settings.N_SLOTS, 
-#            Settings.SEM_DIM + Settings.MAX_ARITY * Settings.N_SLOTS)
-#    import tensorflow as tf
-#    a_sem = data[0,:,:Settings.SEM_DIM].flatten()
-#    b_sem = data[1,:,:Settings.SEM_DIM].flatten()
-#    a_struct = data[0,:,Settings.SEM_DIM:].flatten()
-#    b_struct = data[1,:,Settings.SEM_DIM:].flatten()
-#    sems.append(tf.norm(a_sem - b_sem).numpy())
-#    structs.append(tf.norm(a_struct - b_struct).numpy())
-#    
-#print((np.mean(sems), np.std(sems)))
-#print((np.mean(structs), np.std(structs)))
+
 
     
