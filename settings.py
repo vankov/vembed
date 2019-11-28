@@ -11,7 +11,7 @@ class Settings:
     TRAIN_STEPS_N = 1000
     TRAIN_EPOCHS_N = 10
 
-    SIGMA = 0.7
+    SIGMA = 0.5
 
     VARS_TOTAL_DIM = 0
     VARS_SEM_DIM = 0

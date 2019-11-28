@@ -97,7 +97,7 @@ class VARSData:
                 (n, Settings.N_SLOTS, Settings.SEM_DIM))
         
         vars_data[:,:,Settings.SEM_DIM:] = np.random.choice(
-                    [-1, 1],
+                    [0, 1],
                     p=[0.8, 0.2],
                     size=(
                         n, 
